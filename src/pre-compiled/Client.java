@@ -2,7 +2,7 @@
 
 import java.net.*;
 import java.io.*;
-
+import java.lang.reflect.Array;
 
 import javax.xml.parsers.DocumentBuilder; 
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -10,6 +10,9 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.*;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 
 public class Client {
 	private Socket socket;
@@ -79,10 +82,94 @@ public class Client {
 		}
 
     }
-    
+	
+	private Server getEqualizationServer(Server[] servers, ArrayList<Server> availableServer, Job job) {
+        Server CheapActiveServer = null;
+        Server CheapServer = null;
+        //float memory = 0;
+        //float maxMemory = Integer.MAX_VALUE;
+        double maxFitRate =  Integer.MAX_VALUE;
+        double fitRate = 0;
+        float responRate = 0;
+ //./ds-server -c ds-config-s2-1.xml -v all
+ //./ds-server -c config_simple1.xml -v all
+ //./ds-server -c ds-config-s3-6.xml -v all
+
+        //increasing sort server by id
+        orderServersById(availableServer);
+        //all of the server type in system.xml
+        for (int i = 0; i < servers.length; i++) {
+            String curType = ((Server) Array.get(servers,i)).getType();
+            
+            for (int j = 0; j < availableServer.size(); j++) {
+                Server temp = availableServer.get(j);
+                //only read server type i
+                //16.5 ff
+                if (temp.getType().equals(curType))
+                {
+                    
+                    //(temp.getAvailableTime() < minAvail)
+                    //minAvail = temp.getAvailableTime();
+                    if (serverHasSufficientResources(temp, job))
+                    {
+                        double coreRate, memoryRate, diskRate;
+                    coreRate = (temp.getCoreCount() - job.cores())/job.cores();
+                    memoryRate = (temp.getMemory() - job.getMemory())/job.getMemory();
+                    diskRate = (temp.getDisk() - job.getDisk())/job.getDisk();
+                    responRate = (temp.getAvailableTime() + job.getEstRunTime())/job.getEstRunTime();
+                    fitRate = coreRate + memoryRate + diskRate + responRate;
+
+                   // System.out.print(fitRate+" ");
+                        if(fitRate <= maxFitRate){
+                            maxFitRate = fitRate;
+                            CheapServer = temp;
+                            //break;
+                           // System.out.print(fitRate+" ");
+                            }
+                    }
+                    
+                }
+            }
+        }
+        
+        if(CheapServer != null) return CheapServer;
+        else {
+            // for each server type in the order of appearance in system.xml
+            for (int i = 0; i < servers.length; i++) {
+                String curType = ((Server) Array.get(servers,i)).getType();
+
+                // in the order of id
+                for (int j = 0; j < servers.length; j++) {
+                    Server temp = availableServer.get(j);
+                    if (temp.getType().equals(curType))
+                    {
+                        
+                        if (temp.isActive() && serverHasSufficientResources(((Server) Array.get(servers,i)), job) )
+                        {
+                            double coreRate, memoryRate, diskRate;
+                    coreRate = (temp.getCoreCount() - job.cores())/job.cores();
+                    memoryRate = (temp.getMemory() - job.getMemory())/job.getMemory();
+                    diskRate = (temp.getDisk() - job.getDisk())/job.getDisk();
+                    responRate = (temp.getAvailableTime() + job.getEstRunTime())/job.getEstRunTime();
+                    fitRate = coreRate + memoryRate + diskRate + responRate;
+                            if(fitRate <= maxFitRate){
+                                
+                            maxFitRate = fitRate;
+                            CheapActiveServer = temp;
+                            //break;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return CheapActiveServer;
+        }
+        }
     
     //Follow the ds-sim protocol, including handshake and loop
     public void Run() {
+		Server sendToEFServer;
     	//Handshake
 		send("HELO"+"\n");
 		message = receive();
@@ -141,9 +228,9 @@ public class Client {
 					send("OK"+"\n");
                     message = receive();
 				}
-
+				sendToEFServer = getEqualizationServer(servers,serverList,job);
 					//Schedule jobs to the first largest server
-					send("SCHD " + job.getId() + " " + servers[large].type + " " + "0" +"\n");
+					send("SCHD " + job.getId() + " " + sendToEFServer.getType() + " " + sendToEFServer.getId() +"\n");
 					message = receive();					
 			}
         }
@@ -205,6 +292,21 @@ public class Client {
 			}
 		}
 		return large;
+    }
+	private static void orderServersById(List<Server> servers) {
+        Collections.sort(servers, new Comparator() {
+            public int compare(Object o1, Object o2) {
+                Integer id1 = ((Server) o1).getId();
+                Integer id2 = ((Server) o2).getId();
+                return id1.compareTo(id2);
+            }
+        });
+    }
+
+    private static boolean serverHasSufficientResources(Server server, Job job) {
+        return ((server.getCoreCount() >= job.cores()) &&
+                (server.getDisk() >= job.getDisk()) &&
+                (server.getMemory() >= job.getMemory()));
     }
 
 }
